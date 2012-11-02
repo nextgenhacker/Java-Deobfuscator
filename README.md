@@ -1,4 +1,8 @@
-Java-Deobfuscator
-=================
+Java Deobfuscator
+==============
 
-A tool for deobfuscation of JVM bytecode by analyzing similarities in call-graphs and other program features
+This is a go program for analyzing and comparing graphs of
+structures of java programs, such as call graphs and 
+class hierarchies to provide automatic deobfuscation
+of JVM binaries under the assumption that they are 
+statically linked to a known library.
