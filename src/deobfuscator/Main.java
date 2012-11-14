@@ -1,14 +1,9 @@
 package deobfuscator;
 
-import java.io.File;
 import java.io.FileInputStream;
-import java.io.FilenameFilter;
 import java.io.IOException;
-import java.util.ArrayList;
 
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.tree.ClassNode;
-
+import deobfuscator.comparators.BasicClassComparator;
 import deobfuscator.comparators.FieldCount;
 import deobfuscator.comparators.LinearComparator;
 import deobfuscator.comparators.MethodCount;
@@ -52,9 +47,12 @@ public class Main {
 			libraryClasses = args[2].split(" ");
 		}
 
+		/*
 		LinearComparator metric = new LinearComparator();
 		metric.add(new FieldCount(), 1);
 		metric.add(new MethodCount(), 1);
+		*/
+		BasicClassComparator metric = new BasicClassComparator();
 		ClassMapping deobfuscation;
 		try {
 			deobfuscation = Deobfuscator.deobfuscate(annotatedJarFile,

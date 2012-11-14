@@ -1,5 +1,9 @@
 package deobfuscator.comparators;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodNode;
 
@@ -28,24 +32,71 @@ public class BasicClassComparator implements ClassComparator {
 		}
 		
 		// The result starts at 0 and strictly increases as confidence decreases
-		int result = 0;
+		float result = 0;
 		
-		//
-		// Loop over the methods and determine if the method signatures match
-		//
+		// Make a copy of the set of methods for use in mapping methods
+		List<MethodNode> unassignedMethods = new ArrayList<MethodNode>();
 		for( int i = 0; i < original.methods.size(); i++ ){
-			
-			BasicMethodComparator bcm = new BasicMethodComparator();
-			bcm.similarity((MethodNode)original.methods.get(0), (MethodNode)original.methods.get(0));
-			/*
-			// No suitable matches for this method were found, this class likely does not match the other class
-			if( PotentialMethodMatches.size() == 0 ){
-				return Integer.MAX_VALUE;
+			MethodNode currentNode = (MethodNode)original.methods.get(i);
+			List<String> currentExceptions = new ArrayList<String>();
+			for( int j = 0; j < currentNode.exceptions.size(); j++ ){
+				currentExceptions.add((String)currentNode.exceptions.get(j));
 			}
-*/
+			String[] exceptions_s = new String[currentExceptions.size()];
+			currentExceptions.toArray(exceptions_s);
+			unassignedMethods.add(new MethodNode(currentNode.access,currentNode.name,currentNode.desc,currentNode.signature,exceptions_s));
 		}
 		
-		return result;
+		// Allocate a BasicMethodComparator
+		BasicMethodComparator bmc = new BasicMethodComparator();
+		
+		HashMap<String,String> MethodMappings = new HashMap<String,String>();
+		
+		//
+		// Loop over the methods and try to match them if possible
+		//
+		for( int j = 0; j < transformed.methods.size(); j++ ){
+			
+			float bestMethodConfidence = -1.f;
+			int bestMethodIndex = -1;
+			for( int i = 0; i < unassignedMethods.size(); i++ ){
+				
+				float confidence = bmc.similarity(unassignedMethods.get(i), (MethodNode)transformed.methods.get(j));
+				if( confidence > bestMethodConfidence ){
+					bestMethodIndex = i;
+					bestMethodConfidence = confidence;
+				}
+				
+			}
+			
+			if( bestMethodIndex > -1 ){
+				MethodMappings.put(unassignedMethods.get(bestMethodIndex).name+unassignedMethods.get(bestMethodIndex).desc, ((MethodNode)transformed.methods.get(j)).name+((MethodNode)transformed.methods.get(j)).desc);
+				unassignedMethods.remove(bestMethodIndex);
+				result += bestMethodConfidence;
+			}
+			
+		}
+		
+		result /= ((transformed.methods.size()>0)?transformed.methods.size():1);
+		
+		if( original.fields.size() >= transformed.fields.size() ){
+			if( original.fields.size() > 0 ){
+				result *= (transformed.fields.size()/original.fields.size());
+			}
+		} else {
+			if( transformed.fields.size() > 0 ){
+				result *= (original.fields.size()/transformed.fields.size());
+			}
+		}
+		
+		System.out.println("Compared classes '" + original.name + "' and '" + transformed.name + "':\nResulting Method Mappings:\n");
+		for( String input : MethodMappings.keySet()){
+			System.out.println(input + " -> " + MethodMappings.get(input));
+		}
+		System.out.println("Resulting Confidence:");
+		System.out.printf("%f\n\n",result/((transformed.methods.size()>0)?transformed.methods.size():1));
+		
+		return result/((transformed.methods.size()>0)?transformed.methods.size():1);
 	}
 
 }

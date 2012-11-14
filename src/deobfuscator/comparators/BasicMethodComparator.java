@@ -1,20 +1,26 @@
 package deobfuscator.comparators;
 
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Set;
+import java.util.TreeSet;
+
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.MethodNode;
 
 import deobfuscator.MethodComparator;
 
 public class BasicMethodComparator extends MethodComparator {
+	
+	private static final float METHOD_PARAMETER_CONFIDENCE_PADDING = 0.f;
 
 	@Override
 	public float similarity(MethodNode a, MethodNode b) {
 		// Get the return type and argument types and frequencies of the unobfuscated method
-		HashMap<Type, Integer> A_MethodSignatureStatistics = GetMethodSignatureStatistics(a);
+		HashMap<Type, Integer> A_MethodParameters = GetMethodSignatureStatistics(a);
 		Type A_ReturnType = Type.getReturnType(a.desc);
 		
-		HashMap<Type, Integer> B_MethodSignatureStatistics = GetMethodSignatureStatistics(b);
+		HashMap<Type, Integer> B_MethodParameters = GetMethodSignatureStatistics(b);
 		Type B_ReturnType = Type.getReturnType(b.desc);
 		
 		// If the return types are different, then we know that this is not a potential match
@@ -26,26 +32,33 @@ public class BasicMethodComparator extends MethodComparator {
 		// as the number of dissimilarities increases
 		float MethodConfidence = 1.f;
 		
-		// The confidence is essentially the sum of the differences in the number of
-		// method arguments of each type
-		/*Set<Type> AllParameters = new TreeSet<Type>(new Comparator<Type>() {
+		// Build a list of all parameter types
+		Set<Type> AllParameterTypes = new TreeSet<Type>(new Comparator<Type>(){
 			@Override
+			/*
 			public int compare(Type o1, Type o2) {
-				return (String.valueOf(o1.getSort())+"_"+o1.);
+				return o1.getDescriptor().compareTo(o2.getDescriptor());
+			}
+			*/
+			public int compare(Type o1, Type o2) {
+				return Integer.compare(o1.getSort(),o2.getSort());
 			}
 		});
-		AllParameters.addAll(A_MethodSignatureStatistics.keySet());
-		AllParameters.addAll(B_MethodSignatureStatistics.keySet());
-		for( Type ParameterType : A_MethodSignatureStatistics.keySet() ){
-			if( B_MethodSignatureStatistics.containsKey(ParameterType) ){
-				MethodConfidence += Math.abs(B_MethodSignatureStatistics.get(ParameterType)-A_MethodSignatureStatistics.get(ParameterType));
-			} else {
-				MethodConfidence += A_MethodSignatureStatistics.get(ParameterType);
-			}
-		}*/
+		AllParameterTypes.addAll(A_MethodParameters.keySet());
+		AllParameterTypes.addAll(B_MethodParameters.keySet());
 		
-		for( int i = 0; i < A_MethodSignatureStatistics.keySet().size(); i++ ){
-			System.out.println(((Type)A_MethodSignatureStatistics.keySet().toArray()[i]).getDescriptor());
+		// Iterate over the parameters, multiplying through by the ratio of the number of same-type parameters
+		// in A and B
+		for( Type ParameterType : AllParameterTypes ){
+			if( A_MethodParameters.containsKey(ParameterType) && B_MethodParameters.containsKey(ParameterType) ){
+				float A_Ct = (float)A_MethodParameters.get(ParameterType)+METHOD_PARAMETER_CONFIDENCE_PADDING;
+				float B_Ct = (float)B_MethodParameters.get(ParameterType)+METHOD_PARAMETER_CONFIDENCE_PADDING;
+				MethodConfidence *= (A_Ct>=B_Ct)?(B_Ct/A_Ct):(A_Ct/B_Ct);
+			} else if( A_MethodParameters.containsKey(ParameterType) ) {
+				MethodConfidence *= (METHOD_PARAMETER_CONFIDENCE_PADDING/(A_MethodParameters.get(ParameterType)+METHOD_PARAMETER_CONFIDENCE_PADDING));
+			} else {
+				MethodConfidence *= (METHOD_PARAMETER_CONFIDENCE_PADDING/(B_MethodParameters.get(ParameterType)+METHOD_PARAMETER_CONFIDENCE_PADDING));
+			}
 		}
 		
 		return MethodConfidence;
