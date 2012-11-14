@@ -5,9 +5,12 @@ import java.io.FileInputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodNode;
 
 public class Deobfuscator {
 	
@@ -87,7 +90,7 @@ public class Deobfuscator {
 				ClassNode unobfuscatedClassNode = new ClassNode();
 				unobfusctaedReader.accept(unobfuscatedClassNode, 0);
 				
-				for( int j = 0; j < obfuscatedClassFiles.length; i++ ){
+				for( int j = 0; j < obfuscatedClassFiles.length; j++ ){
 				
 					// Open the current obfuscated file
 					FileInputStream obfuscatedFIS = new FileInputStream(obfuscatedClassFiles[j]);
@@ -95,16 +98,7 @@ public class Deobfuscator {
 					ClassNode obfuscatedClassNode = new ClassNode();
 					obfuscatedReader.accept(obfuscatedClassNode, 0);
 					
-					// Compute the confidence (in this case, the very weak example where the classes match if they have the same number of fields,
-					// interfaces, and methods)
-					int currentConfidence = 0;
-					currentConfidence += Math.abs(unobfuscatedClassNode.fields.size()-obfuscatedClassNode.fields.size());
-					currentConfidence += Math.abs(unobfuscatedClassNode.methods.size()-obfuscatedClassNode.methods.size());
-					currentConfidence += Math.abs(unobfuscatedClassNode.interfaces.size()-obfuscatedClassNode.interfaces.size());
-					currentConfidence += Math.abs(unobfuscatedClassNode.innerClasses.size()-obfuscatedClassNode.innerClasses.size());
-					
-					// Store the current confidence in the confidence matrix
-					confidence[i][j] = currentConfidence;
+					confidence[i][j] = ComputeConfidence(unobfuscatedClassNode,obfuscatedClassNode);
 					
 					obfuscatedFIS.close();
 					
@@ -157,5 +151,102 @@ public class Deobfuscator {
 
 		}
 		
+	}
+	
+	/**
+	 * 
+	 * ComputeConfidence
+	 * 
+	 * @param unobfuscatedNode The ClassNode representation of the current unobfuscated source class that is being searched for.
+	 * @param obfuscatedNode The ClassNode representation of the current obfuscated source class that is being matched against.
+	 * 
+	 * @return The confidence that the unobfuscated source code was transformed into the current obfuscated source code. The closer to 0 the value is, the higher the confidence.
+	 * 
+	 */
+	public static int ComputeConfidence( ClassNode unobfuscatedNode, ClassNode obfuscatedNode ){
+		
+		//
+		// Early rejection step
+		//
+		// It should be a somewhat safe assumption that ProGuard will not:
+		// 1) Add additional fields to classes (provided classes are not being folded together)
+		// 2) Add additional methods to classes (provided classes are not being folded together)
+		// 3) Remove any interfaces from an obfuscated class
+		// 4) Create additional inner classes
+		//
+		if( unobfuscatedNode.fields.size() < obfuscatedNode.fields.size()				||
+			unobfuscatedNode.methods.size() < obfuscatedNode.methods.size()				||
+			unobfuscatedNode.interfaces.size() != obfuscatedNode.interfaces.size() 		||
+			unobfuscatedNode.innerClasses.size() < obfuscatedNode.innerClasses.size()
+		){
+			return Integer.MAX_VALUE;
+		}
+		
+		// The result starts at 0 and strictly increases as confidence decreases
+		int result = 0;
+		
+		//
+		// Loop over the methods and determine if the method signatures match
+		//
+		for( int i = 0; i < unobfuscatedNode.methods.size(); i++ ){
+			
+			// Get the return type and argument types and frequencies of the unobfuscated method
+			HashMap<Type, Integer> UnobfuscatedMethodSignatureStatistics = GetMethodSignatureStatistics((MethodNode)unobfuscatedNode.methods.get(i));
+			Type UnobfuscatedReturnType = Type.getReturnType(((MethodNode)unobfuscatedNode.methods.get(i)).desc);
+			
+			// Set up a list to store potential matches
+			ArrayList<Pair<MethodNode,Integer>> PotentialMethodMatches = new ArrayList<Pair<MethodNode,Integer>>();
+			
+			// Iterate over all methods in the obfuscated class to try and find matches
+			for( int j = 0; j < obfuscatedNode.methods.size(); j++ ){
+				HashMap<Type, Integer> ObfuscatedMethodSignatureStatistics = GetMethodSignatureStatistics((MethodNode)unobfuscatedNode.methods.get(i));
+				Type ObfuscatedReturnType = Type.getReturnType(((MethodNode)unobfuscatedNode.methods.get(i)).desc);
+				
+				// If the return types are different, then we know that this is not a potential match
+				if( ObfuscatedReturnType.getSort() != UnobfuscatedReturnType.getSort() ){
+					continue;
+				}
+				
+				// Compute a "method confidence" that the two methods being compared are the same
+				int MethodConfidence = 0;
+				
+				// The confidence is essentially the sum of the differences in the number of
+				// method arguments of each type
+				for( Type ParameterType : UnobfuscatedMethodSignatureStatistics.keySet() ){
+					if( ObfuscatedMethodSignatureStatistics.containsKey(ParameterType)){
+						MethodConfidence += Math.abs(ObfuscatedMethodSignatureStatistics.get(ParameterType)-UnobfuscatedMethodSignatureStatistics.get(ParameterType));
+					} else {
+						MethodConfidence += UnobfuscatedMethodSignatureStatistics.get(ParameterType);
+					}
+				}
+				
+				// Add this method-confidence pair to the list of candidates
+				PotentialMethodMatches.add(new Pair<MethodNode,Integer>((MethodNode)obfuscatedNode.methods.get(j),MethodConfidence));
+			}
+			
+			// No suitable matches for this method were found, this class likely does not match the other class
+			if( PotentialMethodMatches.size() == 0 ){
+				return Integer.MAX_VALUE;
+			}
+
+		}
+		
+		return result;
+	}
+	
+	/**
+	 * 
+	 * This method takes in a MethodNode and returns a HashMap mapping the argument types and frequency
+	 * 
+	 * @param m The method node to compute argument statistics from
+	 * @return A HashMap mapping argument types to their frequency
+	 */
+	public static HashMap<Type, Integer> GetMethodSignatureStatistics(MethodNode m){
+		HashMap<Type, Integer> result = new HashMap<Type, Integer>(8);
+		Type[] argumentTypes = Type.getArgumentTypes(m.desc);
+		for( Type argumentType : argumentTypes ){
+			result.put(argumentType,(result.containsKey(argumentType)?result.get(argumentType)+1:1));
+		}
+		return result;
 	}
 }
